@@ -36,12 +36,6 @@ export default function Footer() {
           </div>
           
           <nav className="flex items-center space-x-6">
-            <Link href="/terms" className="text-xs uppercase text-zinc-400 hover:text-white transition">
-              Terms
-            </Link>
-            <Link href="/privacy" className="text-xs uppercase text-zinc-400 hover:text-white transition">
-              Privacy
-            </Link>
             <button 
               onClick={() => setShowContactModal(true)}
               className="text-xs uppercase text-zinc-400 hover:text-white transition"
