@@ -49,19 +49,29 @@ export async function POST(req: Request) {
       let serviceAccountAuth;
       
       try {
-        // Handle private key string - replace escaped newlines if needed
-        const privateKey = PRIVATE_KEY.replace(/\\n/g, '\n');
-        
-        // Create JWT auth directly with individual values
+        // Log the environment variable *before* using it
+        console.log(`DEBUG: Raw GOOGLE_CLIENT_EMAIL: "${CLIENT_EMAIL}"`);
+        console.log(`DEBUG: Raw GOOGLE_PRIVATE_KEY starts with: "${PRIVATE_KEY.substring(0, 30)}..."`);
+
+        // Fix: Handle the private key properly - remove any extra quotes and handle newlines
+        const formattedPrivateKey = PRIVATE_KEY
+          .replace(/^"+|"+$/g, '') // Remove any extra quotes at start or end
+          .replace(/\\n/g, '\n');   // Convert \n to actual newlines
+
+        // Log the values being passed to JWT
+        console.log(`DEBUG: Email for JWT: "${CLIENT_EMAIL}"`);
+        console.log(`DEBUG: Formatted Private Key for JWT starts with: "${formattedPrivateKey.substring(0, 30)}..."`);
+
+        // Create JWT auth with properly formatted private key
         serviceAccountAuth = new JWT({
           email: CLIENT_EMAIL,
-          key: privateKey,
+          key: formattedPrivateKey,
           scopes: ['https://www.googleapis.com/auth/spreadsheets'],
         });
         
         console.log("JWT auth created successfully with client email:", CLIENT_EMAIL);
       } catch (error) {
-        console.error("Error parsing credentials:", error);
+        console.error("Error creating JWT auth:", error);
         return NextResponse.json({ 
           message: "Server configuration error", 
           details: "Invalid credentials format" 
@@ -85,44 +95,38 @@ export async function POST(req: Request) {
         }, { status: 500 });
       }
 
-      const sheet = doc.sheetsByIndex[0]; // Use the first sheet
-      console.log("Using sheet:", sheet.title);
+      let sheet;
+      try {
+        // Try to get the first sheet
+        sheet = doc.sheetsByIndex[0];
+        if (!sheet) {
+          // If no sheet exists, create one
+          sheet = await doc.addSheet({ title: 'Waitlist Emails' });
+        }
+        console.log("Using sheet:", sheet.title);
+      } catch (error) {
+        console.error("Error getting/creating sheet:", error);
+        return NextResponse.json({ 
+          message: "Failed to access sheet", 
+          error: error instanceof Error ? error.message : String(error) 
+        }, { status: 500 });
+      }
       
       // Check if headers exist and set them up if needed
-      console.log("Checking for headers...");
-      
       try {
-        // First check if the sheet has any headers
-        const headerValues = sheet.headerValues;
-        console.log("Existing headers:", headerValues);
+        await sheet.loadHeaderRow();
+        const headers = sheet.headerValues;
         
-        if (!headerValues || headerValues.length === 0) {
-          console.log("No headers found, setting up headers...");
+        if (!headers || headers.length === 0) {
+          console.log("Setting up headers...");
           await sheet.setHeaderRow(['Email', 'Name', 'Date']);
-          console.log("Headers set up successfully");
-          
-          // Need to reload sheet info after setting headers
-          await sheet.loadCells('A1:C1');
-          console.log("Sheet data reloaded after header setup");
+        } else {
+          console.log("Headers already exist:", headers);
         }
       } catch (error) {
         // This might happen if the sheet is completely empty
-        console.log("Error checking headers, assuming empty sheet:", error);
-        console.log("Setting up headers for empty sheet...");
-        
-        // For a completely empty sheet, set up the headers
-        await sheet.loadCells('A1:C1');
-        
-        const a1 = sheet.getCell(0, 0);
-        const b1 = sheet.getCell(0, 1);
-        const c1 = sheet.getCell(0, 2);
-        
-        a1.value = 'Email';
-        b1.value = 'Name';
-        c1.value = 'Date';
-        
-        await sheet.saveUpdatedCells();
-        console.log("Headers set up successfully using cell-based approach");
+        console.log("Setting up headers for new sheet...");
+        await sheet.setHeaderRow(['Email', 'Name', 'Date']);
       }
       
       // Add a row with the email and current date
